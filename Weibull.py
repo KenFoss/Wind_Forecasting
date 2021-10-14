@@ -26,6 +26,7 @@ Tv = []
 
 #Values needed for Maximum Likelihood method
 vzero = 0
+
 speeds = [0,0,0,0,0,0] #This list gives amount of speeds within increments of 4 m/s, so 0-4m/s, 4-8 m/s, 8-12, 12-16, 16-20, 20-24
 prob = 0
 
