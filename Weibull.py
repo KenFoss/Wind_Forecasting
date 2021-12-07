@@ -7,6 +7,7 @@ import math
 import csv
 from scipy.special import gamma
 from tabulate import tabulate
+import scipy.integrate as integrate
 
 #This Model takes a csv files of wind speeds in the first column, in m/s, and calculates a Weibull distribution with R^2 and RMSE Error. 
 #Future additions include other methods of calculations for the k and c parameters, and other models such as the Rayleigh Distribution
@@ -21,13 +22,13 @@ import os
 #os.chdir(path)
 print("Current working directory: {0}".format(os.getcwd()))
 
-
+#List for speeds to be read into from CSV
 Tv = []
 
 #Values needed for Maximum Likelihood method
 vzero = 0
 
-speeds = [0,0,0,0,0,0] #This list gives amount of speeds within increments of 4 m/s, so 0-4m/s, 4-8 m/s, 8-12, 12-16, 16-20, 20-24
+#For Probabilities of wind speeds of zero 
 prob = 0
 
 #For Error Calculations, generic between methods
@@ -41,41 +42,19 @@ n = 0
 def weib(p, v, c, k):
     return p * (k/c) * (v/c) ** (k-1) * np.exp(-(v/c)**k)
 
+sendesign = 'Collins_Wind_Data.csv'
+research = 'Nebraska_Data.csv'
 
-
-with open('windspeedtest.csv', 'r') as read_obj:
+with open(sendesign, 'r') as read_obj:
     reader = csv.reader(read_obj)
     for row in reader:
         n += 1;
         speed = float(row[0]); #We read speeds as dictionary with header, row[0] gets value as string, convert to float 
         Tv.append(speed);
-        if speed >= 0:
+        if speed > 0:
             vzero +=1
         prob = float(vzero/n) #probability wind speed exceeds zero
 
-        #The following is for the frequencies of observed wind speed data. Will gather frequency of speeds in the 1 m/s ranges for error calc
-        if 0 <= speed <= 4:
-            speeds[0] += 1
-            yi.append(speeds[0])
-
-        elif speed <= 8:
-            speeds[1] += 1
-            yi.append(speeds[1])
-            
-        elif speed <= 12:
-            speeds[2] += 1
-            yi.append(speeds[2])
-            
-        elif speed <= 16:
-            speeds[3] += 1
-            yi.append(speeds[3])    
-        elif speed <= 20:
-            speeds[4] += 1
-            yi.append(speeds[4])    
-        elif speed <= 24:
-            speeds[5] += 1
-            yi.append(speeds[5]/n)
-        #print("On iteration {}".format(n)) FOR TESTING
             
 print("iteration complete for data import")
         
@@ -84,62 +63,81 @@ print("iteration complete for data import")
 #Weibull distribution over given range for error calculation
 kmlm = 0
 cmlm = 0
+#for testing only
+#kmlm = 2.486088774563999 #Test
+#cmlm = 3.6310269503718406 #Test
 
-def weibmlm(x, y, use): #Weibull Within Time Range for error calc
-    v = []
-    lnv = []
-    vtok = []
-    vlnv = []
-    vzero = 0
-    krange = 2
-    ner = 0 #How many speed points are in the range we are looking for error in
-    i=0
-
-    for i in range(len(Tv)): #n value will not be equal to global n if we look in a range
-        speed = Tv[i]
-        if x <= speed <= y:
-            ner += 1
-
+#Calculate the shape parameter, Iterative
+def kmlmcalc():
+    krange = 2 #Guess for K value
     i = 0
-
-    if ner == 1:
-        #With one value in the bin it will scew data, better to return zero
-        return 0
-
+    lnv = []
+    vlnv = []
+    vtok = []
+    v = []
     while i < len(Tv):
         speed = Tv[i]
-        if x <= speed <= y:  
+        if speed == 0: #zero wind speed makes log indefinite
+            i += 1
+        else:
+            # I would like to see if using a krange calculated for all the data fixes my error issues
             if krange < 0: 
                 print("i = {}, lnv = {}, vlnv = {}, vtok = {}".format(i, lnv[i-1], vlnv[i-1], vtok[i-1]))
             lnv.append(np.log(speed))
             vtok.append(speed ** krange)  #current wind speed to power of k, for scale factor calc
             vlnv.append((speed ** krange) * (np.log(speed)))      
             v.append(speed)
-            krange = (((sum(vlnv) / sum(vtok)) - (sum(lnv) / ner)) ** (-1)) #This code will find the k factor, must be solved iteratively with an original k value guess
+            if i >= 1:
+                krange = (((sum(vlnv) / sum(vtok)) - (sum(lnv) / n)) ** (-1)) #This code will find the k factor, must be solved iteratively with an original k value guess
             #print("speed = {}, krange = {}. sumvlv = {}, sumvtok = {}, sumlnv = {}".format(speed, krange, sum(vlnv), sum(vtok), sum(lnv)))  #TESTING FUNCTION
             if math.isnan(krange): #why is krange coming out as nan, TESTING FUNCTION, problem solved n was not implemented
                 print("krange is nan at iteration {}. sumvlv = {}, sumvtok = {}, sumlnv = {}".format(krange, sum(vlnv), sum(vtok), sum(lnv)))
-        i += 1
-        #print("Iteration in Weibmlm, on iteration {}, k value is {}".format(i, krange))
-    if use == 'error':
-        print("Iteration complete maximum likelihood method, error calculation for range {} - {}".format(x, y))
-        if len(v) != 0 or len(v):
-            crange = ((1/ner) * sum(vtok)) ** (1/krange)  #This code will find c factor, can be solved explicitly
-            weiberror = 0
-            for i in v:
-                weiberror +=  prob * (krange/crange) * ((i/crange) ** (krange-1)) * np.exp(-(i/crange)**krange) #weibull distribution, prob is the probability the wind speed is not zero, then we have c and k factors
-            return weiberror/ner
+            
+            i += 1
+
+    cv = []
+    j = 0
+    while j < len(Tv):
+        speed = Tv[j]
+        if speed == 0: #zero wind speed makes log indefinite
+            j += 1
         else:
-            return 0
+            cv.append(speed**krange)
+        j += 1
+    crange = ((1/n) * sum(cv)) ** (1/krange)  #This code will find c scale factor, can be solved explicitly
+    #Assign global values to be used elsewhere
+    global kmlm
+    kmlm = krange
+    global cmlm
+    cmlm = crange
+
+#Calculate k and c for maximum likelihood method
+kmlmcalc()
+
+def weibull(v): 
+    return prob * (kmlm/cmlm) * ((v/cmlm) ** (kmlm - 1)) * np.exp(-(v/cmlm)**kmlm)
+
+
+def weibmlm(x, y, use): #Weibull Within Time Range for error calc
+    v = []
+
+    points = 100
+    errorv = np.linspace(x, y, points)
+
+    #if ner == 1:
+        #With one value in the bin it will scew data, better to return zero
+    #    return 0
+
+    if use == 'error':
+        #From probability textbook, probability that X takes a value in interval [a,b] is the integral from a to b of the function
+        result = integrate.quad(weibull, x, y)
+        return result[0]
+       
+        
     elif use == 'plot':
         print("iteration complete for plotting weibull, maximum likelihood method")
-        crange = ((1/ner) * sum(vtok)) ** (1/krange)  #This code will find c factor, can be solved explicitly
-        global kmlm #Set global kmlm, to change the value of kmlm outside of this function...same for cmlm
-        kmlm = krange #Set global variables for later display
-        global cmlm 
-        cmlm = crange #''
         xv = np.linspace(min(Tv), max(Tv), 1000)
-        return prob * (krange/crange) * ((xv/crange) ** (krange-1)) * np.exp(-(xv/crange)**krange)
+        return prob * (kmlm/cmlm) * ((xv/cmlm) ** (kmlm-1)) * np.exp(-(xv/cmlm)**kmlm)
 
 #The following function models a weibull distribution by moment method estimation of the c and k parameters
 kmm = int #k value for moment method
@@ -168,7 +166,7 @@ def weibmm(x, y, use):
     k = (stdev/vmean) ** (-1.086)
     c = vmean/(gamma(1 + (1/k)))
     if use == 'error':
-        print("Iteration complete weibull moment method, error calculation for range {} - {}".format(x, y))
+        #print("Iteration complete weibull moment method, error calculation for range {} - {}".format(x, y))
         if len(v) != 0 and c != 0:
             weiber = 0
             for i in v:
@@ -184,7 +182,7 @@ def weibmm(x, y, use):
         cmm = c #''
         xv = np.linspace(min(Tv), max(Tv), 1000)
         return prob * (k/c) * (xv/c) ** (k-1) * np.exp(-(xv/c)**k)
-    #NOT TESTED
+   
 
 #Gets frequencies of wind speeds in a range based on fint, up to ceiling of max wind speed. If inc is 2, we get frequencies of speeds from 0-2 m/s, 2-4 m/s, and so on...
 def freqrange(fint, max):
@@ -200,10 +198,10 @@ def freqrange(fint, max):
         lst.append(current/n)
     return lst
 
-
-incery = 4  #Change increments of frequency range. If 2, we will break speeds into incs of 2 m/s. Frequencies include wind speeds of 0-2 m/s, 2-4 m/s, and on...
+BinNum = 1000 #How many Bins do you want
+incery = max(Tv)/BinNum  #Change increments of frequency range. If 2, we will break speeds into incs of 2 m/s. Frequencies include wind speeds of 0-2 m/s, 2-4 m/s, and on...
 Ery = freqrange(incery, max(Tv))
-#List of the Ranges for our bins, for table to be printed.
+#List of the Ranges for our bins, for table to be printed. NOT BEING USED
 def EryBins(inc):
     lst = []
     k = 0
@@ -245,39 +243,74 @@ freqbins = len(Ery)
 num1 = numWeib('mlm')
 demW= demWeib()
 R2mlm = 1 -  (num1/demW)  
-#RMSEmlm = ((1/6) * num1) ** 0.5 
+RMSEmlm = ((1/len(Ery)) * num1) ** 0.5 
 
 #Error Calculations for Moment Method
 num2 = numWeib('mm')
 R2mm = 1 - (num2/demW)
 RMSEmm = ((1/freqbins) * num2) ** 0.5
 
-Cap = input("What is the turbines power coefficient? Entery nothing if this data is not avalible. ")
-Cp = 0
-if Cap == '':
-    print("Since you do not have a power coefficient, the approximate cubic method will be used. The power coefficient has been set to betz limit of 0.593.")
-    Cp = 0.593 #Betz limit, physacist betz calculated no turbine could convert more then 59.3% of kinetic energy from wind into mechanical energy from turbine
-else:
-    Cp = float(Cap)
 
-A = float(input("What is the rotor area of the turbine (in m^2)? "))
+
+#Enter Turbine Parameters for Calculations of AEP, power curve, capacity factor, region probability
 Ci = float(input("What is the cut-in speed of the turbine? "))
 Co = float(input("What is the cut-out speed of the turbine? "))
-Pr = float(input("What is the rated power of the turbine? "))
+Pr = float(input("What is the rated power of the turbine? (in kW)"))
 Vr = float(input("What is the rated wind speed fo the turbine? "))
 
-#This may be deleted, ideally I would like to have multiple points of air density data to average
-p = float(input("What is the air density? "))
+#for power curve, normalized power
+def normPow(v):
+    return ((v**(kmlm)) - (Ci ** (kmlm))) / ((Vr ** (kmlm)) - (Ci ** (kmlm)))
 
-def cubpow(p, A, Cp):
-    vpow = np.linspace(0, 23, 1000)
+#for capacity factor calculation, normalized power times weibull
+def CapCalc(v):
+    nP = ((v**(kmlm)) - (Ci ** (kmlm))) / ((Vr ** (kmlm)) - (Ci ** (kmlm)))
+    Wei = prob * (kmlm/cmlm) * ((v/cmlm) ** (kmlm - 1)) * np.exp(-(v/cmlm)**kmlm)
+    return nP*Wei
+
+#calculate capactiy factor
+def capFact():
+    Unrated = integrate.quad(CapCalc, Ci, Vr)
+    Rated = integrate.quad(weibull, Vr, Co)
+    return Unrated[0] + Rated[0]
+
+CF = capFact()
+Peavg = Pr * CF
+AEP = Peavg * 8760 #Annual energy production, Peavg in kW * hours in year
+
+#Calculate probability density of being in the different regions
+def regionWeib(min, max, reg):
+    weib = 0
+    space = np.linspace(min, max, 1000)  
+    if reg == 'unrated':
+        #goes to max-0.001 as this region excends from Vci <= V < Vr
+        result = integrate.quad(weibull, min, max-0.001)
+        return result[0] 
+    if reg == 'rated':
+        #Goes to max as this region excends from Vr <= V <= Vco
+        result = integrate.quad(weibull, min, max)
+        return result[0] 
+    if reg == 'cutin':
+        #goes to max-0.001 as this region excends from 0 <= V < Vci
+        result = integrate.quad(weibull, min, max-0.001)
+        return result[0]
+    if reg == 'cutout':
+        #Starts at min + 0.001 as this region excends from Vco < V <= Vmax
+        result = integrate.quad(weibull, min+0.001, max)
+        return result[0] 
+    
+
+
+#perhaps change this later for general power curve
+def genpow():
+    vpow = np.linspace(0, 30, 1000)
     lst = []
     for j in vpow:
         speed = j
         if speed < Ci:
             lst.append(0)
         elif Ci <= speed < Vr: #MOdel says the speed should cut off at Vr, which it does but not mathematically
-            lst.append(((0.5) * p * A * Cp * (speed ** 3)) * (0.000001))
+            lst.append(normPow(speed) * Pr)
         elif Vr <= speed <= Co: #Also changed from Vr
             lst.append(Pr)
         elif speed > Co:
@@ -291,8 +324,8 @@ freqheader = [EryBins(incery)]
 #evenly spaces wind speed over 1000 points based on its minimum and maximum
 xv = np.linspace(min(Tv), max(Tv), 1000)
 
-#plt.plot(xv, weibmlm(0, 24, 'plot'), label = " Maximum Likelihood Method: k = {}, c = {}, R^2 = {}, RMSE = {}".format(kmlm, cmlm, R2mlm, RMSEmlm))
-plt.plot(xv, weibmm(0, 24, 'plot'), label = " Moment Method: k = {}, c = {}, R^2 = {}, RMSE = {}".format(kmm, cmm, R2mm, RMSEmm)) 
+plt.plot(xv, weibmlm(0, 24, 'plot'), label = " Maximum Likelihood Method: k = {}, c = {}, R^2 = {}, RMSE = {}".format(kmlm, cmlm, R2mlm, RMSEmlm))
+#plt.plot(xv, weibmm(0, 24, 'plot'), label = " Moment Method: k = {}, c = {}, R^2 = {}, RMSE = {}".format(kmm, cmm, R2mm, RMSEmm)) 
 inchist = [i for i in range(math.ceil(max(Tv)))] #x values for histogram, if max speed is 24 m/s, will give frequencies from 1 to 24 in increments of 1, so the first will be speeds from 0-1, then 1-2 and so on.
 histweight = freqrange(1, math.ceil(max(Tv) - 1)) #x and weights must be lists of same length, use ceiling of wind speed max to ensure this as we will get frequencies in increments of 1.
 plt.hist(inchist, weights = histweight, bins = range(len(inchist))) #plot observed wind speed frequencies
@@ -302,14 +335,42 @@ plt.title("Weibull Distribution on Historical Wind data, 2007-2012, 30 Minute In
 plt.legend()
 plt.show()
 
+i = 0
+for i in range(math.ceil(max(Tv))):
+    print(inchist[i], histweight[i])
+    i += 1
+
+print('Unrated region average probability:')
+print(regionWeib(Ci, Vr, 'unrated'))
+
+print('Rated region average probability:')
+print(regionWeib(Vr, Co, 'rated'))
+
+print('Cut-in average probability:')
+print(regionWeib(0, Ci, 'cutin'))
+
+print('Cut-out region average probability:')
+print(regionWeib(Co, max(Tv), 'rated'))
+
+print('Capacity Factor')
+print(CF)
+
+print('AEP')
+print(AEP)
+
+print('Average Expected Output Power')
+print(Peavg)
+
 xp = np.linspace(0, 30, 1000)
-#power = np.piecewise(xp, [xp < Ci, ((Ci <= xp) & (xp < Vr)), ((Vr <= xp) & (xp <= Co)), xp > Co], [0, cubpow(p,A,Cp), Pr, 0])
-pw = cubpow(p,A,Cp)
+#Power Curve, Experimental not correct, Not being used
+#power = np.piecewise(xp, [xp < Ci, ((Ci <= xp) & (xp < Vr)), ((Vr <= xp) & (xp <= Co)), xp > Co], [0, genpow(), Pr, 0])
+pw = genpow()
 plt.plot(xp, pw)
-plt.vlines(Ci, 0, Pr, colors = '#008000', linestyles = 'dashed', label = 'cut-in speed')
-plt.vlines(Co, 0, Pr, colors = '#ff0000', linestyles = 'dashed', label = 'cut-in speed')
+#plt.vlines(Ci, 0, Pr, colors = '#008000', linestyles = 'dashed', label = 'cut-in speed')
+#plt.vlines(Co, 0, Pr, colors = '#008000', linestyles = 'dashed', label = 'cut-out speed')
 plt.xlabel("Wind speed at 100m, evenly spaced over 1000 points (m/s)")
-plt.ylabel("Power (MW)")
+plt.ylabel("Power (kW)")
+plt.title("Power Curve")
 plt.show()
 
 print("DONE")
